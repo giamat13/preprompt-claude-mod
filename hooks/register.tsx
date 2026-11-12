@@ -161,12 +161,17 @@ export const register: Register = on => {
     const text = await run($, t)
     // Send after this command finishes, so the session is idle and the prompt starts its own turn.
     setTimeout(() => {
+      // If the send is refused or fails, put the prompt in the box so one Enter sends it.
+      const fallback = (why: string) => {
+        $.ui.toast(`Preprompt: could not send (${why}). The prompt is in the box: press Enter.`)
+        void $.prompt.fill({ text }).catch(() => {})
+      }
       $.prompt
         .submit({ text, asUser: true })
         .then(r => {
-          if (r.drop) $.ui.toast(`Preprompt: prompt was not sent (${r.drop}).`)
+          if (r.drop) fallback(r.drop)
         })
-        .catch(err => $.ui.toast(`Preprompt: sending failed (${err instanceof Error ? err.message : String(err)}).`))
+        .catch(err => fallback(err instanceof Error ? err.message : String(err)))
     }, 300)
     return { text: 'Preprompt: sending the detailed prompt now.' }
   })
