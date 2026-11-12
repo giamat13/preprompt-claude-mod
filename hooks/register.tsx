@@ -120,6 +120,14 @@ async function askGaps($: EngineInterface, gaps: Gap[]): Promise<QA[]> {
   return out
 }
 
+let logText = ''
+const LOG = 'C:/Users/thefu/preprompt-debug.log'
+const dbg = async ($: EngineInterface, m: string) => {
+  logText += `${new Date().toISOString()} ${m}
+`
+  await $.fs.write(LOG, logText).catch(() => {})
+}
+
 async function run($: EngineInterface, t: string): Promise<string> {
   try {
     const model = helperModel(await $.session.model())
@@ -142,6 +150,7 @@ async function run($: EngineInterface, t: string): Promise<string> {
     return detailed
   } catch (err) {
     $.ui.status(undefined)
+    void dbg($, `run failed: ${err instanceof Error ? err.message : String(err)}`)
     $.ui.toast(`Preprompt failed: ${err instanceof Error ? err.message : String(err)}. Sent as typed.`)
     return t
   }
@@ -157,18 +166,23 @@ export const register: Register = on => {
 
   on('command.run', { command: CMD }, async ($, e) => {
     const t = e.args.trim()
+    await dbg($, `command.run args=${t}`)
     if (!t) return { text: 'Usage: /preprompt <your prompt>' }
     const text = await run($, t)
+    await dbg($, `run done, len=${text.length}, changed=${text !== t}`)
     // Send after this command finishes, so the session is idle and the prompt starts its own turn.
     setTimeout(() => {
+      void dbg($, 'timer fired, submitting')
       // If the send is refused or fails, put the prompt in the box so one Enter sends it.
       const fallback = (why: string) => {
+        void dbg($, `fallback: ${why}`)
         $.ui.toast(`Preprompt: could not send (${why}). The prompt is in the box: press Enter.`)
         void $.prompt.fill({ text }).catch(() => {})
       }
       $.prompt
         .submit({ text, asUser: true })
         .then(r => {
+          void dbg($, `submit result drop=${r.drop ?? 'none'}`)
           if (r.drop) fallback(r.drop)
         })
         .catch(err => fallback(err instanceof Error ? err.message : String(err)))
