@@ -5,9 +5,7 @@ import type { EngineInterface, PromptSubmitInput, Register } from 'claude-code'
 // The detailed prompt replaces the typed one and is sent.
 
 const CMD = 'preprompt'
-const MIN_WORDS = 4
 const MAX_QUESTIONS = 4
-const ENABLED = { plugin: 'preprompt', key: 'enabled' } as const
 const SKIPPED = 'skipped, no answer'
 
 // fable -> opus, opus -> sonnet, sonnet -> haiku, haiku stays haiku.
@@ -45,8 +43,6 @@ Rules:
 export type Gap = { q: string; options: string[] }
 export type QA = { q: string; a: string | null }
 
-const words = (t: string) => t.trim().split(/\s+/).filter(Boolean).length
-const fromPerson = (e: PromptSubmitInput) => e.origin.kind === 'composer' || e.origin.kind === 'bridge'
 
 const stripFences = (raw: string) =>
   raw
@@ -91,11 +87,6 @@ export const writePrompt = (original: string, qa: QA[]) => {
   return `${p}\n\nWrite the final prompt now.`
 }
 
-async function isOn($: EngineInterface) {
-  const v = await $.store.get('enabled').catch(() => undefined)
-  return v !== false
-}
-
 async function findGaps($: EngineInterface, model: string, text: string): Promise<Gap[]> {
   try {
     const r = await $.model.complete({
@@ -129,56 +120,46 @@ async function askGaps($: EngineInterface, gaps: Gap[]): Promise<QA[]> {
   return out
 }
 
-let handled = false
+async function run($: EngineInterface, t: string): Promise<string> {
+  try {
+    const model = helperModel(await $.session.model())
+    $.ui.status(`Preprompt: reading your prompt (${model})`)
+    const qa = await askGaps($, await findGaps($, model, t))
+    $.ui.status(`Preprompt: writing the detailed prompt (${model})`)
+    const r = await $.model.complete({
+      model,
+      system: WRITE_SYSTEM,
+      prompt: writePrompt(t, qa),
+      maxTokens: 3000,
+      effort: 'low',
+      timeoutMs: 90_000,
+    })
+    $.ui.status(undefined)
+    if (!r.isAnswered) throw new Error(failWhy(r))
+    const detailed = stripFences(r.text)
+    if (!detailed) throw new Error('the model gave no text')
+    $.ui.toast('Preprompt: sent the detailed prompt.')
+    return detailed
+  } catch (err) {
+    $.ui.status(undefined)
+    $.ui.toast(`Preprompt failed: ${err instanceof Error ? err.message : String(err)}. Sent as typed.`)
+    return t
+  }
+}
 
+// Runs only when you type: /preprompt <your prompt>
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const result = await next(e)
-    await $.command.register({ name: CMD, description: 'Turn preprompt on or off' })
-    await $.state.set(ENABLED, await isOn($))
+    await $.command.register({ name: CMD, description: 'Write a detailed prompt from your short one: /preprompt <prompt>', argumentHint: '<your prompt>' } as never)
     return result
   })
 
-  on('command.run', { command: CMD }, async $ => {
-    const now = !(await isOn($))
-    await $.store.set('enabled', now)
-    await $.state.set(ENABLED, now)
-    const text = now ? 'Preprompt is on.' : 'Preprompt is off.'
-    $.ui.toast(text)
-    return { text }
-  })
-
-  on('prompt.submit', async ($, e, next) => {
-    const t = e.text.trim()
-    if (e.command || e.isMeta || !fromPerson(e) || t.startsWith('/') || words(t) < MIN_WORDS) return next(e)
-    if (!(await isOn($))) return next(e)
-    // Only the first prompt of a chat.
-    if (handled || (await $.session.turns().catch(() => 0)) > 1) return next(e)
-    handled = true
-
-    try {
-      const model = helperModel(await $.session.model())
-      $.ui.status(`Preprompt: reading your prompt (${model})`)
-      const qa = await askGaps($, await findGaps($, model, t))
-      $.ui.status(`Preprompt: writing the detailed prompt (${model})`)
-      const r = await $.model.complete({
-        model,
-        system: WRITE_SYSTEM,
-        prompt: writePrompt(t, qa),
-        maxTokens: 3000,
-        effort: 'low',
-        timeoutMs: 90_000,
-      })
-      $.ui.status(undefined)
-      if (!r.isAnswered) throw new Error(failWhy(r))
-      const detailed = stripFences(r.text)
-      if (!detailed) throw new Error('the model gave no text')
-      $.ui.toast('Preprompt: sent the detailed prompt.')
-      return next({ ...e, text: detailed })
-    } catch (err) {
-      $.ui.status(undefined)
-      $.ui.toast(`Preprompt failed: ${err instanceof Error ? err.message : String(err)}. Sent as typed.`)
-      return next(e)
-    }
+  on('command.run', { command: CMD }, async ($, e) => {
+    const t = e.args.trim()
+    if (!t) return { text: 'Usage: /preprompt <your prompt>' }
+    const text = await run($, t)
+    void $.prompt.submit({ text, asUser: true })
+    return { text: 'Preprompt: prompt ready, sending.' }
   })
 }

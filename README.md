@@ -4,13 +4,13 @@ A Claude Code mod. Before each prompt is sent, a model one tier below the one yo
 
 ## How it works
 
-1. You type the first prompt of a chat (4 words or more, not a `/` command). Later prompts are left alone.
+1. You type `/preprompt <your prompt>`. Prompts typed without it are left alone.
 2. A helper model one tier below your session model reads it: fable uses opus, opus uses sonnet, sonnet uses haiku.
 3. It asks up to 4 short questions, only where the answer would change the result. Skip any you like.
 4. It writes the final prompt in your language and keeps all your facts. The detail matches the task: short for a small one, structured for a big one, never padded.
 5. That prompt is sent. If anything fails, your original prompt is sent as typed.
 
-`/preprompt` turns the mod on or off.
+The mod runs only when you type `/preprompt`.
 
 ## Install
 
