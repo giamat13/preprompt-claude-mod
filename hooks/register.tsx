@@ -159,7 +159,15 @@ export const register: Register = on => {
     const t = e.args.trim()
     if (!t) return { text: 'Usage: /preprompt <your prompt>' }
     const text = await run($, t)
-    void $.prompt.submit({ text, asUser: true })
-    return { text: 'Preprompt: prompt ready, sending.' }
+    // Send after this command finishes, so the session is idle and the prompt starts its own turn.
+    setTimeout(() => {
+      $.prompt
+        .submit({ text, asUser: true })
+        .then(r => {
+          if (r.drop) $.ui.toast(`Preprompt: prompt was not sent (${r.drop}).`)
+        })
+        .catch(err => $.ui.toast(`Preprompt: sending failed (${err instanceof Error ? err.message : String(err)}).`))
+    }, 300)
+    return { text: 'Preprompt: sending the detailed prompt now.' }
   })
 }
