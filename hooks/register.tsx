@@ -38,7 +38,8 @@ Rules:
 - Keep every fact, name, number, file, link and tool from the original. Add no new facts, names or requirements.
 - Make it as detailed as the task needs, no more. A small task gets a few clear lines; a big or vague task gets sections for the goal, context, scope, constraints, expected format and what "done" means. Never pad, repeat yourself or add requirements the person did not imply. Where something is unknown, say so plainly instead of inventing it.
 - Tell the assistant to be thorough where the task needs it, without padding or an unneeded long answer.
-- Use each answer as the person's own words. Where an answer was skipped, leave that point open for the assistant to decide or ask.`
+- Use each answer as the person's own words. Where an answer was skipped, leave that point open for the assistant to decide or ask.
+- If <project_context> is given, use it only to avoid needless questions and to name real files; never invent anything beyond it.`
 
 export type Gap = { q: string; options: string[] }
 export type QA = { q: string; a: string | null }
@@ -78,7 +79,7 @@ export const parseGaps = (raw: string): Gap[] => {
 const failWhy = (r: { reason: string; error?: string; status?: number | null }) =>
   r.reason === 'api-error' ? `the model call failed (${r.error}${r.status ? ` ${r.status}` : ''})` : r.reason === 'aborted' ? 'the model call timed out' : 'the model gave no text'
 
-export const writePrompt = (original: string, qa: QA[]) => {
+export const writePrompt = (original: string, qa: QA[], ctx = '') => {
   let p = `Here is the person's prompt:\n\n<prompt>\n${original}\n</prompt>`
   if (qa.length) {
     const lines = qa.map(x => `Q: ${x.q}\nA: ${x.a ?? SKIPPED}`).join('\n\n')
@@ -87,7 +88,7 @@ export const writePrompt = (original: string, qa: QA[]) => {
   return `${p}\n\nWrite the final prompt now.`
 }
 
-async function findGaps($: EngineInterface, model: string, text: string): Promise<Gap[]> {
+async function findGaps($: EngineInterface, model: string, text: string, ctx: string): Promise<Gap[]> {
   try {
     const r = await $.model.complete({
       model,
@@ -120,6 +121,45 @@ async function askGaps($: EngineInterface, gaps: Gap[]): Promise<QA[]> {
   return out
 }
 
+// Read-only look at the project, so the helper model can ask better questions and
+// write a prompt that names real files. Reads at most a few small files.
+const MAX_FILES = 3
+const MAX_CHARS = 4000
+const SKIP = /^(node_modules|\.git|dist|build|\.next|\.venv|__pycache__)$/
+
+async function lookAround($: EngineInterface, text: string): Promise<string> {
+  const parts: string[] = []
+  try {
+    const cwd = await $.session.cwd()
+    const entries = await $.fs.list()
+    const names = entries.filter(x => !SKIP.test(x.name)).slice(0, 60).map(x => (x.kind === 'directory' ? `${x.name}/` : x.name))
+    parts.push(`Working directory: ${cwd}
+Top level: ${names.join(', ')}`)
+    const wanted = new Set<string>()
+    for (const m of text.matchAll(/[\w./\-]+\.[A-Za-z0-9]{1,6}/g)) wanted.add(m[0])
+    for (const f of ['CLAUDE.md', 'README.md']) if (names.includes(f)) wanted.add(f)
+    let n = 0
+    for (const f of wanted) {
+      if (n >= MAX_FILES) break
+      try {
+        if (!(await $.fs.exists(f))) continue
+        const body = await $.fs.read(f)
+        if (typeof body !== 'string') continue
+        parts.push(`File ${f}:
+${body.slice(0, MAX_CHARS)}`)
+        n++
+      } catch {}
+    }
+  } catch {}
+  return parts.length ? `
+
+<project_context>
+${parts.join('
+
+')}
+</project_context>` : ''
+}
+
 let logText = ''
 const LOG = 'C:/Users/thefu/preprompt-debug.log'
 const dbg = async ($: EngineInterface, m: string) => {
@@ -132,12 +172,13 @@ async function run($: EngineInterface, t: string): Promise<string> {
   try {
     const model = helperModel(await $.session.model())
     $.ui.status(`Preprompt: reading your prompt (${model})`)
-    const qa = await askGaps($, await findGaps($, model, t))
+    const ctx = await lookAround($, t)
+    const qa = await askGaps($, await findGaps($, model, t, ctx))
     $.ui.status(`Preprompt: writing the detailed prompt (${model})`)
     const r = await $.model.complete({
       model,
       system: WRITE_SYSTEM,
-      prompt: writePrompt(t, qa),
+      prompt: writePrompt(t, qa, ctx),
       maxTokens: 3000,
       effort: 'low',
       timeoutMs: 90_000,
