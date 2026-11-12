@@ -127,6 +127,34 @@ const MAX_FILES = 3
 const MAX_CHARS = 4000
 const SKIP = /^(node_modules|\.git|dist|build|\.next|\.venv|__pycache__)$/
 
+// Read-only GitHub lookups, only when the prompt talks about an issue or PR.
+// Fixed argument lists, no shell: gh issue/pr view and gh issue list. Nothing is changed.
+async function gh($: EngineInterface, argv: string[]): Promise<string | null> {
+  try {
+    const r = await $.process.run(['gh', ...argv], { timeoutMs: 15_000 } as never)
+    return r.exitCode === 0 ? r.stdout.slice(0, MAX_CHARS) : null
+  } catch {
+    return null
+  }
+}
+
+async function lookAtGithub($: EngineInterface, text: string): Promise<string[]> {
+  const out: string[] = []
+  const nums = new Set<string>()
+  for (const m of text.matchAll(/(?:issue|bug|#)\s*#?(\d{1,6})/gi)) nums.add(m[1])
+  const isPr = /\b(pr|pull request)\b/i.test(text)
+  for (const n of [...nums].slice(0, 2)) {
+    const kind = isPr ? 'pr' : 'issue'
+    const body = await gh($, [kind, 'view', n, '--json', 'number,title,state,body,labels'])
+    if (body) out.push(`GitHub ${kind} #${n}:\n${body}`)
+  }
+  if (!nums.size && /\bissues?\b/i.test(text)) {
+    const list = await gh($, ['issue', 'list', '--limit', '15'])
+    if (list) out.push(`Open GitHub issues:\n${list}`)
+  }
+  return out
+}
+
 async function lookAround($: EngineInterface, text: string): Promise<string> {
   const parts: string[] = []
   try {
@@ -151,6 +179,7 @@ ${body.slice(0, MAX_CHARS)}`)
       } catch {}
     }
   } catch {}
+  parts.push(...(await lookAtGithub($, text)))
   return parts.length ? `
 
 <project_context>
