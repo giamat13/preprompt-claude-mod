@@ -1,0 +1,7 @@
+{
+  "name": "preprompt",
+  "version": "0.1.0",
+  "description": "Before each prompt is sent, a model one tier below yours asks you questions, then writes the real, very detailed prompt and sends it",
+  "author": { "name": "GIAMAT13", "url": "https://github.com/GIAMAT13" },
+  "types": "./types/index.d.ts"
+}

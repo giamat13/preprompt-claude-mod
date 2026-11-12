@@ -1,0 +1,4 @@
+benai-mods.zip
+.agent-dashboard/
+node_modules/
+*.log

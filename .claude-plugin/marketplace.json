@@ -1,0 +1,13 @@
+{
+  "name": "preprompt-mods",
+  "owner": { "name": "GIAMAT13" },
+  "description": "Mods by GIAMAT13 for Claude Code",
+  "plugins": [
+    {
+      "name": "preprompt",
+      "source": "./",
+      "description": "Before each prompt is sent, a model one tier below yours asks you questions, then writes the real, very detailed prompt and sends it",
+      "version": "0.1.0"
+    }
+  ]
+}
