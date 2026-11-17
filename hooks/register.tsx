@@ -183,9 +183,7 @@ ${body.slice(0, MAX_CHARS)}`)
   return parts.length ? `
 
 <project_context>
-${parts.join('
-
-')}
+${parts.join('\n\n')}
 </project_context>` : ''
 }
 

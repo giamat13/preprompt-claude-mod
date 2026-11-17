@@ -3,4 +3,3 @@ declare module 'claude-code' {
     "preprompt": { enabled: boolean }
   }
 }
-export {}
